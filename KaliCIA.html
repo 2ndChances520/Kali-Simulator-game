@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-
+    8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CIA Infiltration Op: ViperNest</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            background-color: #000000;
+            color: #00FF00; /* Classic green terminal text */
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Hide scrollbars from body */
+        }
+
+        #three-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1; /* Behind the terminal */
+        }
+
+        #terminal-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            max-width: 900px;
+            height: 70%;
+            max-height: 600px;
+            background-color: rgba(10, 10, 10, 0.85); /* Slightly transparent black */
+            border: 2px solid #00FF00;
+            box-shadow: 0 0 20px #00FF00;
+            padding: 15px;
+            overflow-y: auto; /* Scroll for terminal output */
+            display: flex;
+            flex-direction: column;
+        }
+
+        #output {
+            flex-grow: 1;
+            white-space: pre-wrap; /* Preserve line breaks and spaces */
+            word-wrap: break-word;
+        }
+
+        .prompt-line {
+            display: flex;
+            align-items: center;
+        }
+
+        .prompt {
+            color: #00FFFF; /* Cyan for prompt */
+            margin-right: 8px;
+        }
+
+        #input-line {
+            background-color: transparent;
+            border: none;
+            color: #00FF00;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1em;
+            outline: none;
+            flex-grow: 1;
+            caret-color: #00FF00;
+        }
+
+        .system-message { color: #FFFF00; } /* Yellow for system messages */
+        .error-message { color: #FF0000; } /* Red for errors */
+        .success-message { color: #00FF00; } /* Green for success */
+        .narrative-text { color: #CCCCCC; } /* Light gray for narrative */
+        .ascii-art { color: #33CC33; line-height: 1.1em; }
+
+        /* Blinking cursor simulation for input */
+        #input-line:focus {
+            /* We can't easily do a true blinking cursor in pure CSS for an input field value
+               but caret-color helps a lot. A more complex JS solution would be needed for a span-based cursor. */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="three-canvas"></canvas>
+    <div id="terminal-container">
+        <div id="output"></div>
+        <div class="prompt-line">
+            <span class="prompt" id="prompt-text">anon@cia-gate:~#</span>
+            <input type="text" id="input-line" autofocus>
+        </div>
+    </div>
+
+    <script>
+        // --- Three.js Background ---
+        let scene, camera, renderer, stars;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.z = 1; // Keep camera close for particles
+            
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas'), alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0.8); // Black with some transparency to see body bg if needed
+
+            const starGeo = new THREE.BufferGeometry();
+            const starVertices = [];
+            for (let i = 0; i < 8000; i++) { // Reduced for performance in a single file
+                const x = (Math.random() - 0.5) * 2000;
+                const y = (Math.random() - 0.5) * 2000;
+                const z = (Math.random() - 0.5) * 2000;
+                starVertices.push(x, y, z);
+            }
+            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            
+            const starMaterial = new THREE.PointsMaterial({
+                color: 0x004400, // Darker green for subtlety
+                size: 0.7,
+                transparent: true,
+                opacity: 0.5
+            });
+            stars = new THREE.Points(starGeo, starMaterial);
+            scene.add(stars);
+
+            animateThree();
+        }
+
+        function animateThree() {
+            requestAnimationFrame(animateThree);
+            stars.rotation.x += 0.0001;
+            stars.rotation.y += 0.0002;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Terminal Logic ---
+        const outputElement = document.getElementById('output');
+        const inputElement = document.getElementById('input-line');
+        const promptElement = document.getElementById('prompt-text');
+        const terminalContainer = document.getElementById('terminal-container');
+
+        let commandHistory = [];
+        let historyIndex = -1;
+        let currentStage = 0; // Tracks game progress
+
+        // Game State
+        let gameState = {
+            targetIP: null,
+            foundVulnerabilities: false,
+            accessGranted: false,
+            decryptedFiles: false,
+            currentPath: "~",
+            files: {
+                "~": ["readme.txt", "intel_reports/"],
+                "~/intel_reports": ["operation_vipernest.enc", "agent_manifest.enc"]
+            },
+            fileContents: {
+                "~/readme.txt": `
+Welcome, operative.
+Your mission: Infiltrate the secure CIA network segment codenamed "ViperNest".
+Primary Objective: Retrieve decrypted intelligence on rogue agent "Serpent".
+
+Available tools:
+  scan <ip_range>   - Scans for active hosts. Try 'scan 10.77.0.0/24'.
+  nmap <ip>         - Enumerates services and potential vulnerabilities on a host.
+  exploit <vuln_id> - Attempts to exploit a found vulnerability.
+  ls [path]         - Lists files in the current or specified directory.
+  cd <path>         - Changes directory.
+  cat <file>        - Displays file content. If encrypted, may require decryption.
+  decrypt <file>    - Attempts to decrypt a file (if access is gained).
+  help              - Shows this help message.
+  clear             - Clears the terminal.
+
+Stay vigilant. Failure is not an option.
+                `,
+                "~/intel_reports/operation_vipernest.enc": "CIPHERTEXT_VIPERNEST_DATA_LOCATION_SERPENT_CONTACTS_ENCRYPTED_AES256",
+                "~/intel_reports/agent_manifest.enc": "CIPHERTEXT_AGENT_ROSTER_POTENTIAL_MOLES_ENCRYPTED_AES256"
+            }
+        };
+
+        const welcomeMessage = `
+<span class="ascii-art">
+   ______ ____   ___       ___  __  ___   __  _   _____ ______ ____  
+  / ____// __ \\ /   |     |__ \\/  |/  |  / / | | / /__ // ____// __ \\ 
+ / /    / / / // /| | _____ __// /|_/ /  / /  | |/ / / //___ \\/ / / / 
+/ /___ / /_/ // ___ |_____/ __/ /  / /  / /___|    / / /____/ / /_/ /  
+\\____/ \\____//_/  |_|    /____/_/  /_/  /_____/_/|_/ /_/_____/\\____/   
+</span>
+<span class="system-message">Kali Linux (Simulated) v2024.1</span>
+<span class="narrative-text">Boot sequence complete. Secure connection to CIA staging server established.
+Awaiting your command, operative. Type 'help' for a list of commands.</span>
+`;
+
+        function displayOutput(text, type = "") {
+            const sanitizedText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); // Basic sanitization
+            const messageDiv = document.createElement('div');
+            if (type) {
+                messageDiv.classList.add(type + "-message");
+            }
+            // Allow HTML for specific classes like ascii-art
+            if (type === "ascii-art" || text.includes("<span")) { 
+                 messageDiv.innerHTML = text; // Use original text if it contains spans
+            } else {
+                messageDiv.textContent = sanitizedText;
+            }
+            outputElement.appendChild(messageDiv);
+            terminalContainer.scrollTop = terminalContainer.scrollHeight;
+        }
+        
+        function displayPromptLine(command) {
+            const line = document.createElement('div');
+            line.innerHTML = `<span class="prompt">${promptElement.textContent}</span> ${command.replace(/</g, "&lt;").replace(/>/g, "&gt;")}`;
+            outputElement.appendChild(line);
+        }
+
+        function handleCommand(command) {
+            displayPromptLine(command);
+            commandHistory.unshift(command); // Add to history
+            historyIndex = -1; // Reset history navigation
+
+            const args = command.trim().split(/\s+/);
+            const cmd = args[0].toLowerCase();
+            
+            switch (cmd) {
+                case 'help':
+                    displayOutput(gameState.fileContents["~/readme.txt"]);
+                    break;
+                case 'clear':
+                    outputElement.innerHTML = '';
+                    break;
+                case 'scan':
+                    if (args.length < 2) {
+                        displayOutput("Usage: scan <ip_range>", "error");
+                    } else if (args[1] === "10.77.0.0/24") {
+                        displayOutput("Scanning 10.77.0.0/24...", "system");
+                        setTimeout(() => {
+                            displayOutput("Host found: 10.77.0.12 (VIPERNEST_PRIMARY_SRV)", "success");
+                            gameState.targetIP = "10.77.0.12";
+                            currentStage = 1;
+                        }, 1500);
+                    } else {
+                        displayOutput(`No hosts found in range ${args[1]}.`, "narrative");
+                    }
+                    break;
+                case 'nmap':
+                    if (args.length < 2) {
+                        displayOutput("Usage: nmap <ip>", "error");
+                    } else if (args[1] === gameState.targetIP) {
+                        if (currentStage < 1) {
+                             displayOutput(`Host ${args[1]} not found. Try 'scan' first.`, "error");
+                             break;
+                        }
+                        displayOutput(`Scanning ${gameState.targetIP}...`, "system");
+                        setTimeout(() => {
+                            displayOutput(`
+Host: ${gameState.targetIP}
+Ports:
+  22/tcp   OPEN  ssh     OpenSSH 7.9p1
+  80/tcp   OPEN  http    Apache httpd 2.4.38 ((Debian))
+  443/tcp  OPEN  https   Apache httpd 2.4.38 ((Debian))
+  3306/tcp CLOSED mysql
+Vulnerabilities:
+  [VULN001] Apache HTTP Server 2.4.38 - Remote Code Execution (CVE-2021-41773 variant)
+                            `, "success");
+                            gameState.foundVulnerabilities = true;
+                            currentStage = 2;
+                        }, 2000);
+                    } else {
+                        displayOutput(`Host ${args[1]} not responding or not found.`, "narrative");
+                    }
+                    break;
+                case 'exploit':
+                    if (args.length < 2) {
+                        displayOutput("Usage: exploit <vuln_id>", "error");
+                    } else if (currentStage < 2) {
+                        displayOutput("No known vulnerabilities to exploit. Run 'nmap <target_ip>' first.", "error");
+                    } else if (args[1].toUpperCase() === "VULN001") {
+                        displayOutput("Attempting to exploit VULN001 on " + gameState.targetIP + "...", "system");
+                        setTimeout(() => {
+                            displayOutput("Exploit successful! Root access gained to VIPERNEST_PRIMARY_SRV.", "success");
+                            gameState.accessGranted = true;
+                            promptElement.textContent = `root@vipernest:~#`;
+                            gameState.currentPath = "~"; // Reset path on target system
+                            currentStage = 3;
+                        }, 2500);
+                    } else {
+                        displayOutput("Exploit failed or vulnerability ID not found.", "error");
+                    }
+                    break;
+                case 'ls':
+                    if (!gameState.accessGranted && gameState.currentPath !== "~") { // Allow ls in home before access
+                        displayOutput("Access denied. Exploit target system first.", "error");
+                        break;
+                    }
+                    let pathToList = gameState.currentPath;
+                    if (args.length > 1) {
+                        pathToList = resolvePath(args[1]);
+                    }
+                    
+                    if (gameState.files[pathToList]) {
+                        gameState.files[pathToList].forEach(item => {
+                            displayOutput(item);
+                        });
+                    } else {
+                        displayOutput(`ls: cannot access '${args[1] || pathToList}': No such file or directory`, "error");
+                    }
+                    break;
+                case 'cd':
+                    if (args.length < 2) {
+                        displayOutput("Usage: cd <directory>", "error");
+                        break;
+                    }
+                    if (!gameState.accessGranted && args[1] !== 'intel_reports') { // Allow cd to intel_reports from home initially
+                         if (gameState.currentPath === "~" && args[1] === "intel_reports/"){
+                             // Allow this specific cd for initial exploration
+                         } else {
+                            displayOutput("Access denied. Exploit target system first.", "error");
+                            break;
+                         }
+                    }
+
+                    const newPath = resolvePath(args[1]);
+                    if (gameState.files[newPath] && newPath.endsWith('/')) {
+                        gameState.currentPath = newPath;
+                        if (gameState.accessGranted) {
+                            promptElement.textContent = `root@vipernest:${newPath}#`;
+                        } else {
+                            promptElement.textContent = `anon@cia-gate:${newPath}#`;
+                        }
+                    } else if (gameState.files[newPath.slice(0,-1)] && newPath.endsWith('/')){ // Try without trailing slash if it's a directory
+                        gameState.currentPath = newPath;
+                         if (gameState.accessGranted) {
+                            promptElement.textContent = `root@vipernest:${newPath}#`;
+                        } else {
+                            promptElement.textContent = `anon@cia-gate:${newPath}#`;
+                        }
+                    }
+                    else {
+                        displayOutput(`cd: ${args[1]}: No such file or directory`, "error");
+                    }
+                    break;
+                case 'cat':
+                    if (args.length < 2) {
+                        displayOutput("Usage: cat <file>", "error");
+                        break;
+                    }
+                    const filePathToCat = resolvePath(args[1]);
+                    if (gameState.fileContents[filePathToCat]) {
+                        if (!gameState.accessGranted && filePathToCat.includes(".enc")) {
+                             displayOutput("Access denied. Cannot read encrypted file without system access.", "error");
+                             break;
+                        }
+                        if (filePathToCat.includes(".enc") && !gameState.decryptedFiles) {
+                            displayOutput(gameState.fileContents[filePathToCat], "narrative");
+                            displayOutput("File is encrypted. Use 'decrypt <file>' to attempt decryption.", "system");
+                        } else if (filePathToCat.includes(".enc") && gameState.decryptedFiles) {
+                             // Simulate decrypted content
+                            if (filePathToCat.endsWith("operation_vipernest.enc")) {
+                                displayOutput(`
+== DECRYPTED: operation_vipernest.txt ==
+SUBJECT: Rogue Agent "Serpent"
+STATUS: Active threat, deep cover.
+LAST KNOWN LOCATION: Encrypted coordinates (see intel_package_alpha.dat)
+PRIMARY CONTACT: Codename "Whisper" - communications via dead drop, location changes weekly.
+OBJECTIVE: Locate Serpent, ascertain motives, neutralize if necessary.
+This information is TOP SECRET. Handle with extreme caution.
+                                `, "success");
+                                if (currentStage < 5) currentStage = 5; // Can jump here if manifest decrypted first
+                            } else if (filePathToCat.endsWith("agent_manifest.enc")) {
+                                displayOutput(`
+== DECRYPTED: agent_manifest.txt ==
+CIA AGENT MANIFEST - SECTION 7 (VIPERNEST PERSONNEL)
+...
+[ENTRY REDACTED]
+Agent ID: SX881 ("Serpent") - Status: ROGUE - Clearance: OMEGA
+Analyst Note: Serpent has high-level access codes. May have compromised internal systems.
+Recommend immediate lockdown of Project CHIMERA.
+...
+[ENTRY REDACTED]
+                                `, "success");
+                                if (currentStage < 5) currentStage = 5;
+                            }
+                            if (currentStage === 5) {
+                                displayOutput("\nMISSION COMPLETE: You have retrieved critical intelligence on Agent Serpent. Exfiltrate data and await further instructions.", "success ascii-art");
+                                inputElement.disabled = true; // End game
+                            }
+                        }
+                        else {
+                            displayOutput(gameState.fileContents[filePathToCat]);
+                        }
+                    } else {
+                        displayOutput(`cat: ${args[1]}: No such file or directory`, "error");
+                    }
+                    break;
+                case 'decrypt':
+                    if (currentStage < 3) {
+                        displayOutput("Cannot run decryption tools without system access.", "error");
+                        break;
+                    }
+                    if (args.length < 2) {
+                        displayOutput("Usage: decrypt <file>", "error");
+                        break;
+                    }
+                    const fileToDecrypt = resolvePath(args[1]);
+                    if (gameState.fileContents[fileToDecrypt] && fileToDecrypt.includes(".enc")) {
+                        displayOutput(`Attempting decryption of ${args[1]}...`, "system");
+                        setTimeout(() => {
+                            displayOutput(`Decryption successful for ${args[1]}! (Underlying encryption layer bypassed)`, "success");
+                            gameState.decryptedFiles = true; // Simplified: decrypting one means all are conceptually decryptable
+                            currentStage = 4;
+                            displayOutput("You can now 'cat' the .enc files to view their decrypted content.", "system");
+                        }, 2000);
+                    } else if (gameState.fileContents[fileToDecrypt]) {
+                        displayOutput(`${args[1]} is not an encrypted file.`, "narrative");
+                    }
+                    else {
+                        displayOutput(`decrypt: ${args[1]}: No such file or directory`, "error");
+                    }
+                    break;
+                case 'whoami':
+                    displayOutput(gameState.accessGranted ? "root" : "anon");
+                    break;
+                case 'pwd':
+                    displayOutput(gameState.currentPath);
+                    break;
+                default:
+                    displayOutput(`Command not found: ${cmd}. Type 'help' for available commands.`, "error");
+            }
+        }
+
+        function resolvePath(pathToResolve) {
+            if (pathToResolve.startsWith('/')) return pathToResolve; // Absolute path
+            if (pathToResolve === '..') {
+                if (gameState.currentPath === "~" || gameState.currentPath === "~/") return "~/";
+                let parts = gameState.currentPath.slice(0, -1).split('/'); // remove trailing slash for split
+                parts.pop();
+                return parts.length > 1 ? parts.join('/') + '/' : "~/";
+            }
+            
+            let current = gameState.currentPath;
+            if (!current.endsWith('/')) current += '/';
+
+            let resolved = (current === "~/" ? "~/" : current) + pathToResolve;
+            
+            // Normalize: if it's a directory, ensure it ends with a slash
+            if (gameState.files[resolved] && !resolved.endsWith('/') && gameState.files[resolved].some(f => f.endsWith('/'))) {
+                 // This logic is tricky; for now assume if it exists in files keys and is a dir, it should have a slash
+            } else if (gameState.files[resolved + '/']) {
+                resolved += '/';
+            }
+
+            return resolved;
+        }
+
+
+        inputElement.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const command = inputElement.value.trim();
+                if (command) {
+                    handleCommand(command);
+                }
+                inputElement.value = '';
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    inputElement.value = commandHistory[historyIndex];
+                    inputElement.setSelectionRange(inputElement.value.length, inputElement.value.length); // Move cursor to end
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    inputElement.value = commandHistory[historyIndex];
+                    inputElement.setSelectionRange(inputElement.value.length, inputElement.value.length); // Move cursor to end
+                } else if (historyIndex === 0) {
+                    historyIndex = -1;
+                    inputElement.value = '';
+                }
+            } else if (e.key === 'Tab') {
+                e.preventDefault(); // Basic tab prevention for now
+                // Autocomplete could be complex; for now, just prevent default tab behavior
+            }
+        });
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            initThree();
+            displayOutput(welcomeMessage, "system"); // Use system to allow spans in welcome
+            inputElement.focus();
+        });
+        
+        // Keep focus on input
+        terminalContainer.addEventListener('click', () => {
+            inputElement.focus();
+        });
+
+    </script>
+</body>
+</html>
